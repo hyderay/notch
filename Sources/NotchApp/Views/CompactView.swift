@@ -29,12 +29,18 @@ struct CompactView: View {
         max(0, geometry.sideWidth - outerInset)
     }
 
+    /// Centre the side controls across the notch row plus the activity row.
+    private var statusVerticalOffset: CGFloat {
+        showsActivity ? Self.activityHeight / 2 : 0
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 leading
                     .frame(width: contentWidth, alignment: .leading)
                     .padding(.leading, outerInset)
+                    .offset(y: statusVerticalOffset)
 
                 if geometry.voidWidth > 0 {
                     Color.clear.frame(width: geometry.voidWidth)
@@ -43,6 +49,7 @@ struct CompactView: View {
                 trailing
                     .frame(width: contentWidth, alignment: .trailing)
                     .padding(.trailing, outerInset)
+                    .offset(y: statusVerticalOffset)
             }
             .frame(width: geometry.bodyWidth, height: geometry.notchHeight)
 
@@ -72,10 +79,6 @@ struct CompactView: View {
         HStack(spacing: 6) {
             if showsRing {
                 ProgressRing(state: state)
-                    // The compact body extends below the hardware-notch row for
-                    // the activity label. Centre the status light across that
-                    // full height instead of leaving it near the top edge.
-                    .offset(y: showsActivity ? Self.activityHeight / 2 : 0)
             }
             if !geometry.hasRealNotch, let session = snapshot.sessions.first {
                 Text(session.agent.displayName)
@@ -102,7 +105,6 @@ struct CompactView: View {
                     .foregroundStyle(Theme.primaryText.opacity(0.85))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                    .offset(y: showsActivity ? Self.activityHeight / 2 : 0)
             } else if showsRing {
                 Text(state.displayName)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
