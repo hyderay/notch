@@ -58,10 +58,11 @@ Push two fingers toward the island to hide it completely, even from compact mode
 ### Homebrew
 
 ```bash
-brew install --cask --no-quarantine hyderay/tap/notch
+brew install --cask hyderay/tap/notch
+xattr -dr com.apple.quarantine /Applications/Notch.app
 ```
 
-Release builds are ad-hoc signed, so the `--no-quarantine` flag is required until notarized builds are available.
+The second command is currently required because release builds are ad-hoc signed.
 
 ### Download a release
 
