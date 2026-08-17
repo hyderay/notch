@@ -16,12 +16,13 @@ enum Haptics {
         set { Settings.shared.hapticFeedback = newValue }
     }
 
-    /// A single crisp tap, matching the feel of snapping to an alignment guide.
+    /// A distinct tap for a discrete overlay transition. The generic pattern is
+    /// more reliable for feedback that is not tied to an active drag gesture.
     static func overlayDidSnap() {
         guard isEnabled else { return }
         let now = Date()
         guard now.timeIntervalSince(lastFired) >= minimumInterval else { return }
         lastFired = now
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
     }
 }

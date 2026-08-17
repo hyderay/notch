@@ -33,7 +33,7 @@ When Codex CLI or Claude Code is working, the notch quietly grows a little wider
     \----------------------------------/
 ```
 
-Expanding and collapsing under the pointer give a Force Touch haptic tap, so the notch feels like a physical control rather than a hover tooltip. Auto-expansion (when an agent needs your attention) stays silent on purpose.
+Expanding under the pointer gives a Force Touch haptic tap, so the notch feels like a physical control rather than a hover tooltip. Collapsing and auto-expansion (when an agent needs your attention) stay silent on purpose.
 
 Push two fingers toward the island to hide it completely, even from compact mode. Pull two fingers away from the same top-center area to bring it back. The gesture can be disabled from the menu bar.
 
@@ -192,17 +192,17 @@ See [DESIGN.md](DESIGN.md) for the architecture, the transcript formats, and the
 
 ## Resource use
 
-Measured on an M3 Pro, Release build, no debug logging. Prefer Activity Monitor "Memory" / `footprint` over RSS.
+Measured on an M3 Pro on August 18, 2026, using the installed Release build with no debug logging. CPU is a percentage of one core.
 
-| State | CPU (one core) | Physical memory |
-| --- | --- | --- |
-| Idle, overlay hidden | 0.00% | ~19–24 MB |
-| Agent working, compact | ~0.6–1.6% | +1–2 MB |
-| After the session ends | back to 0.00% | back to the idle plateau |
+| State | Average CPU | RSS | RSS span during sample |
+| --- | --- | --- | --- |
+| Idle, overlay hidden | 0.70% | 55.6 MB | 48 KB |
+| Agent working, compact | 0.17% | 61.0 MB | 192 KB |
+| After the session ends | 0.00% | 60.9 MB | 144 KB |
 
-RSS looks higher (~60–75 MB) because it counts the dyld shared cache; that is not leak. `leaks` on an ad-hoc GUI app also reports ~20 KB of system NSXPC cycles — ignore those unless a stack lands in `Notch` / `NotchCore`.
+The post-exercise physical footprint was 16.0 MB. RSS is higher because it includes shared mappings and is not the same as physical footprint. `leaks` reported a fixed 20,016 bytes in system NSXPC/AppIntents cycles and no stack attributed to `Notch` or `NotchCore`.
 
-Watchers are event-driven (FSEvents), not polling. The spinner is a Core Animation layer. Run `make check-resources` to verify the CPU and memory budgets after runtime changes.
+Watchers are event-driven (FSEvents), not polling, and the compact status indicator has no display-rate animation. Run `make check-resources` to verify the CPU and memory budgets after runtime changes. The gate requires idle CPU at or below 1%, working CPU at or below 5%, bounded RSS growth, and no leaks attributed to project code.
 
 ## Privacy
 

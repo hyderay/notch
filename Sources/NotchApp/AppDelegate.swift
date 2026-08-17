@@ -502,18 +502,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Settings.shared.hideInFullScreen && fullScreenActive
     }
 
-    private func refreshFullScreenState(allowReveal: Bool = true) {
+    private func refreshFullScreenState(
+        allowReveal: Bool = true,
+        reassertLayout: Bool = false
+    ) {
         let next = FullScreenDetector.isFrontmostAppFullScreen(on: model.geometry.screenFrame)
         // Positive results are useful immediately. During a Space animation,
         // transient negative results would briefly reveal the panel over the
         // destination app, so only the last scheduled sample may reveal it.
         guard next || allowReveal else { return }
 
+        let previous = fullScreenActive
         let wasHidden = isHiddenForFullScreen
         fullScreenActive = next
         let hidden = isHiddenForFullScreen
-        if hidden != wasHidden {
-            Log.debug("full screen: \(next ? "active" : "inactive")")
+        if hidden != wasHidden || next != previous || reassertLayout {
+            if next != previous {
+                Log.debug("full screen: \(next ? "active" : "inactive")")
+            }
             applyLayout()
         } else {
             publishDebugState()
@@ -526,7 +532,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fullScreenUpdateWorkItems = delays.enumerated().map { index, delay in
             let isFinalSample = index == delays.indices.last
             let work = DispatchWorkItem { [weak self] in
-                self?.refreshFullScreenState(allowReveal: isFinalSample)
+                self?.refreshFullScreenState(
+                    allowReveal: isFinalSample,
+                    reassertLayout: isFinalSample
+                )
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
             return work
