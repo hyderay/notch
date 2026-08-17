@@ -52,7 +52,14 @@ final class SpinnerArcView: NSView {
     override var isFlipped: Bool { true }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow == nil { stopMotionTimer() }
+        if let window {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: .notchPanelVisibilityDidChange,
+                object: window
+            )
+        }
+        stopMotionTimer()
         super.viewWillMove(toWindow: newWindow)
     }
 
@@ -60,6 +67,18 @@ final class SpinnerArcView: NSView {
         super.viewDidMoveToWindow()
         let scale = window?.backingScaleFactor ?? 2
         arc.contentsScale = scale
+        if let window {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowVisibilityChanged),
+                name: .notchPanelVisibilityDidChange,
+                object: window
+            )
+        }
+        syncMotionTimer()
+    }
+
+    @objc private func windowVisibilityChanged() {
         syncMotionTimer()
     }
 
@@ -108,7 +127,7 @@ final class SpinnerArcView: NSView {
 
     private func syncMotionTimer() {
         stopMotionTimer()
-        guard window != nil, motion != .still else { return }
+        guard window?.isVisible == true, motion != .still else { return }
 
         let interval: TimeInterval = motion == .spin ? 0.25 : 0.5
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in

@@ -80,10 +80,38 @@ private final class CompactElapsedTextField: NSTextField {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil {
-            stopClock()
-        } else {
+        if let window {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowVisibilityChanged),
+                name: .notchPanelVisibilityDidChange,
+                object: window
+            )
+        }
+        syncClock()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if let window {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: .notchPanelVisibilityDidChange,
+                object: window
+            )
+        }
+        stopClock()
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    @objc private func windowVisibilityChanged() {
+        syncClock()
+    }
+
+    private func syncClock() {
+        if window?.isVisible == true {
             startClock()
+        } else {
+            stopClock()
         }
     }
 

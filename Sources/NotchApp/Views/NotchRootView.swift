@@ -56,7 +56,10 @@ struct NotchRootView: View {
             alignment: .top
         )
         .opacity(visible ? 1 : 0)
-        .animation(Self.motion, value: model.presentation)
+        // Hidden <-> compact is handled by the panel reveal/order-out path.
+        // Animating zero-size SwiftUI content while AppKit restores the window
+        // from its parked 1pt frame causes a visible first-frame hitch.
+        .animation(Self.motion, value: model.presentation == .expanded)
         .animation(Self.motion, value: model.snapshot.sessions.count)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }

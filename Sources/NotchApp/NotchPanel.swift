@@ -2,6 +2,12 @@ import AppKit
 import NotchCore
 import SwiftUI
 
+extension Notification.Name {
+    static let notchPanelVisibilityDidChange = Notification.Name(
+        "com.wanquanlin.notch.panelVisibilityDidChange"
+    )
+}
+
 /// Borderless overlay panel that floats above the menu bar on every Space.
 final class NotchPanel: NSPanel {
     init(contentRect: NSRect) {
@@ -29,6 +35,20 @@ final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
     override var acceptsFirstResponder: Bool { false }
+
+    override func orderFrontRegardless() {
+        super.orderFrontRegardless()
+        publishVisibilityChange()
+    }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        publishVisibilityChange()
+    }
+
+    private func publishVisibilityChange() {
+        NotificationCenter.default.post(name: .notchPanelVisibilityDidChange, object: self)
+    }
 }
 
 /// Reports whether the cursor is over the overlay.

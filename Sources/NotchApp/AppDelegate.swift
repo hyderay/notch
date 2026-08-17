@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import NotchCore
+import QuartzCore
 import SwiftUI
 
 @MainActor
@@ -16,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pruneTimer: Timer?
     private var fullScreenUpdateWorkItems: [DispatchWorkItem] = []
     private var fullScreenActive = false
+    private var fullScreenFadeGeneration: Int?
+    private var fullScreenFadeWorkItem: DispatchWorkItem?
 
     /// Coalesces bursts of source updates into one main-thread refresh.
     private var refreshScheduled = false
@@ -45,13 +48,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspaceNotifications = NSWorkspace.shared.notificationCenter
         workspaceNotifications.addObserver(
             self,
-            selector: #selector(workspaceChanged),
+            selector: #selector(activeSpaceChanged),
             name: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil
         )
         workspaceNotifications.addObserver(
             self,
-            selector: #selector(workspaceChanged),
+            selector: #selector(frontmostApplicationChanged),
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
@@ -65,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pruneTimer?.invalidate()
         fullScreenUpdateWorkItems.forEach { $0.cancel() }
         fullScreenUpdateWorkItems.removeAll()
+        fullScreenFadeWorkItem?.cancel()
         hoverMonitor?.stop()
         twoFingerSwipeMonitor?.stop()
         sources.forEach { $0.stop() }
@@ -347,14 +351,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let generation = layoutGeneration
         let target = model.windowFrame
 
-        if !model.geometry.hasRealNotch || isHiddenForFullScreen {
+        if !model.geometry.hasRealNotch {
+            cancelFullScreenFade()
             hoverMonitor.stop()
             model.setHovering(false)
             panel.ignoresMouseEvents = true
             panel.orderOut(nil)
+            panel.alphaValue = 1
             publishDebugState()
             return
         }
+
+        if isHiddenForFullScreen {
+            hoverMonitor.stop()
+            model.setHovering(false)
+            panel.ignoresMouseEvents = true
+            fadeOutPanel(generation: generation)
+            publishDebugState()
+            return
+        }
+
+        cancelFullScreenFade()
 
         if model.presentation == .hidden {
             hoverMonitor.stop()
@@ -368,10 +385,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let grown = panel.frame.isEmpty ? target : panel.frame.union(target)
+        let needsReveal = !panel.isVisible
         panel.ignoresMouseEvents = false
-        panel.setFrame(grown, display: true)
-        panel.orderFrontRegardless()
+        if needsReveal {
+            revealPanel(at: target)
+        } else {
+            let grown = panel.frame.isEmpty ? target : panel.frame.union(target)
+            panel.setFrame(grown, display: true)
+            panel.orderFrontRegardless()
+        }
         hoverMonitor.start()
         publishDebugState()
 
@@ -382,6 +404,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.hoverMonitor.evaluate()
             self.publishDebugState()
         }
+    }
+
+    /// Restores an ordered-out panel only after its final compact layout has
+    /// rendered. This keeps AppKit's 1pt parked frame out of the visible path.
+    private func revealPanel(at frame: CGRect) {
+        panel.alphaValue = 0
+        panel.setFrame(frame, display: false)
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+        panel.orderFrontRegardless()
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.24
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.allowsImplicitAnimation = true
+            panel.animator().alphaValue = 1
+        }
+    }
+
+    private func fadeOutPanel(generation: Int) {
+        guard panel.isVisible else {
+            cancelFullScreenFade()
+            panel.orderOut(nil)
+            return
+        }
+        guard fullScreenFadeGeneration == nil else { return }
+        fullScreenFadeGeneration = generation
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.fullScreenFadeGeneration == generation,
+                  self.isHiddenForFullScreen
+            else { return }
+            self.fullScreenFadeWorkItem = nil
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.34
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                context.allowsImplicitAnimation = true
+                self.panel.animator().alphaValue = 0
+            } completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self,
+                          self.fullScreenFadeGeneration == generation
+                    else { return }
+                    self.fullScreenFadeGeneration = nil
+                    guard self.isHiddenForFullScreen else { return }
+                    self.panel.orderOut(nil)
+                    self.panel.alphaValue = 1
+                    self.publishDebugState()
+                }
+            }
+        }
+        fullScreenFadeWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: work)
+    }
+
+    private func cancelFullScreenFade() {
+        fullScreenFadeWorkItem?.cancel()
+        fullScreenFadeWorkItem = nil
+        fullScreenFadeGeneration = nil
+        panel.alphaValue = 1
     }
 
     private func publishDebugState() {
@@ -419,18 +502,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Settings.shared.hideInFullScreen && fullScreenActive
     }
 
-    private func refreshFullScreenState() {
+    private func refreshFullScreenState(allowReveal: Bool = true) {
         let next = FullScreenDetector.isFrontmostAppFullScreen(on: model.geometry.screenFrame)
-        guard next != fullScreenActive else { return }
+        // Positive results are useful immediately. During a Space animation,
+        // transient negative results would briefly reveal the panel over the
+        // destination app, so only the last scheduled sample may reveal it.
+        guard next || allowReveal else { return }
+
+        let wasHidden = isHiddenForFullScreen
         fullScreenActive = next
-        Log.debug("full screen: \(next ? "active" : "inactive")")
-        applyLayout()
+        let hidden = isHiddenForFullScreen
+        if hidden != wasHidden {
+            Log.debug("full screen: \(next ? "active" : "inactive")")
+            applyLayout()
+        } else {
+            publishDebugState()
+        }
     }
 
     private func scheduleFullScreenRefresh() {
         fullScreenUpdateWorkItems.forEach { $0.cancel() }
-        fullScreenUpdateWorkItems = [0.12, 0.5, 1.0].map { delay in
-            let work = DispatchWorkItem { [weak self] in self?.refreshFullScreenState() }
+        let delays: [TimeInterval] = [0.08, 0.35, 0.8, 1.4]
+        fullScreenUpdateWorkItems = delays.enumerated().map { index, delay in
+            let isFinalSample = index == delays.indices.last
+            let work = DispatchWorkItem { [weak self] in
+                self?.refreshFullScreenState(allowReveal: isFinalSample)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
             return work
         }
@@ -442,7 +539,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyLayout()
     }
 
-    @objc private func workspaceChanged() {
+    @objc private func activeSpaceChanged() {
+        scheduleFullScreenRefresh()
+    }
+
+    @objc private func frontmostApplicationChanged() {
         scheduleFullScreenRefresh()
     }
 
@@ -515,61 +616,158 @@ private enum FullScreenDetector {
               let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         else { return false }
 
-        if let fullScreen = accessibilityFullScreenState(processID: frontmostPID) {
-            return fullScreen
-        }
-
         let displayBounds = CGDisplayBounds(CGDirectDisplayID(screenNumber.uint32Value))
         guard let windows = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
             kCGNullWindowID
         ) as? [[String: Any]] else { return false }
 
-        return windows.contains { window in
+        let frontmostWindowBounds = windows.compactMap { window -> CGRect? in
             guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == frontmostPID,
                   (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
                   let boundsDictionary = window[kCGWindowBounds as String] as? [String: CGFloat],
                   let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
-            else { return false }
+            else { return nil }
+            return bounds
+        }
 
-            return coversDisplay(window: bounds, display: displayBounds)
+        switch accessibilityFullScreenState(
+            processID: frontmostPID,
+            display: displayBounds,
+            onScreenWindows: frontmostWindowBounds
+        ) {
+        case true:
+            return true
+        case false:
+            // Some apps implement a custom full-screen window while reporting
+            // AXFullScreen=false. Accept that only when it covers the complete
+            // display; the looser fallback below would include maximized windows.
+            return frontmostWindowBounds.contains {
+                FullScreenWindowCoverage.coversEntireDisplay(window: $0, display: displayBounds)
+            } || FullScreenWindowCoverage.collectivelyCoversDisplay(
+                windows: frontmostWindowBounds,
+                display: displayBounds,
+                minimumAreaCoverage: 0.995
+            )
+        case nil:
+            // Chrome composes its full-screen UI from several layer-0 surfaces
+            // (content, toolbar, tab strip). No individual surface is tall
+            // enough, but together they cover the same area as a native window.
+            return frontmostWindowBounds.contains {
+                FullScreenWindowCoverage.coversDisplay(window: $0, display: displayBounds)
+            } || FullScreenWindowCoverage.collectivelyCoversDisplay(
+                windows: frontmostWindowBounds,
+                display: displayBounds,
+                minimumAreaCoverage: 0.94
+            )
         }
     }
 
-    /// Native full-screen windows on notched Macs deliberately leave the camera
-    /// band outside their bounds, so geometry alone cannot identify them. AppKit
-    /// exposes the authoritative state through the focused window's AX attribute.
-    private static func accessibilityFullScreenState(processID: pid_t) -> Bool? {
+    /// Checks every relevant window, not just the focused one. Chromium apps
+    /// can move focus to a child or update the focused window before the actual
+    /// full-screen window during a Space transition.
+    private static func accessibilityFullScreenState(
+        processID: pid_t,
+        display: CGRect,
+        onScreenWindows: [CGRect]
+    ) -> Bool? {
         let application = AXUIElementCreateApplication(processID)
+        var candidates: [(window: AXUIElement, mayLackFrame: Bool)] = []
+
         var focusedValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
+        if AXUIElementCopyAttributeValue(
             application,
             kAXFocusedWindowAttribute as CFString,
             &focusedValue
-        ) == .success, let focusedValue else { return nil }
+        ) == .success, let focusedValue,
+           CFGetTypeID(focusedValue) == AXUIElementGetTypeID() {
+            candidates.append((focusedValue as! AXUIElement, true))
+        }
 
-        let focusedWindow = focusedValue as! AXUIElement
-        var fullScreenValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            focusedWindow,
-            "AXFullScreen" as CFString,
-            &fullScreenValue
-        ) == .success else { return nil }
-        return (fullScreenValue as? NSNumber)?.boolValue
+        var windowsValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            application,
+            kAXWindowsAttribute as CFString,
+            &windowsValue
+        ) == .success, let windows = windowsValue as? [AXUIElement] {
+            candidates.append(contentsOf: windows.map { ($0, false) })
+        }
+
+        var foundRelevantState = false
+        for candidate in candidates {
+            if let frame = accessibilityFrame(of: candidate.window) {
+                guard isMostlyOnDisplay(window: frame, display: display) else { continue }
+                // AXWindows includes windows parked on other Spaces. Match the
+                // candidate to Quartz's on-screen list before trusting it.
+                guard candidate.mayLackFrame || onScreenWindows.contains(where: {
+                    framesRepresentSameWindow($0, frame)
+                }) else { continue }
+            } else if !candidate.mayLackFrame {
+                continue
+            }
+
+            guard let fullScreen = accessibilityBoolean(
+                candidate.window,
+                attribute: "AXFullScreen" as CFString
+            ) else { continue }
+            foundRelevantState = true
+            if fullScreen { return true }
+        }
+        return foundRelevantState ? false : nil
     }
 
-    /// Full-screen windows occasionally overscan by a few points during Space
-    /// transitions, so compare coverage rather than requiring byte-identical
-    /// bounds. The high area threshold still excludes ordinary maximized windows
-    /// that leave the menu bar visible.
-    static func coversDisplay(window: CGRect, display: CGRect) -> Bool {
-        guard display.width > 0, display.height > 0 else { return false }
+    private static func accessibilityBoolean(
+        _ element: AXUIElement,
+        attribute: CFString
+    ) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let number = value as? NSNumber
+        else { return nil }
+        return number.boolValue
+    }
+
+    /// Accessibility and Quartz both use a top-left global coordinate system
+    /// for external application windows, so the frame can be compared directly
+    /// with CGDisplayBounds.
+    private static func accessibilityFrame(of window: AXUIElement) -> CGRect? {
+        var positionValue: CFTypeRef?
+        var sizeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            window,
+            kAXPositionAttribute as CFString,
+            &positionValue
+        ) == .success, let positionValue,
+              AXUIElementCopyAttributeValue(
+                window,
+                kAXSizeAttribute as CFString,
+                &sizeValue
+              ) == .success, let sizeValue,
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID()
+        else { return nil }
+
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin),
+              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+        else { return nil }
+        return CGRect(origin: origin, size: size)
+    }
+
+    private static func isMostlyOnDisplay(window: CGRect, display: CGRect) -> Bool {
+        guard window.width > 0, window.height > 0 else { return false }
         let intersection = window.intersection(display)
         guard !intersection.isNull else { return false }
-
-        let widthCoverage = intersection.width / display.width
-        let heightCoverage = intersection.height / display.height
-        let bottomAligned = abs(window.maxY - display.maxY) <= 4
-        return widthCoverage >= 0.99 && heightCoverage >= 0.94 && bottomAligned
+        return intersection.width * intersection.height >= window.width * window.height * 0.5
     }
+
+    private static func framesRepresentSameWindow(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        let tolerance: CGFloat = 8
+        return abs(lhs.minX - rhs.minX) <= tolerance
+            && abs(lhs.minY - rhs.minY) <= tolerance
+            && abs(lhs.width - rhs.width) <= tolerance
+            && abs(lhs.height - rhs.height) <= tolerance
+    }
+
 }
