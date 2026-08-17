@@ -636,9 +636,9 @@ private enum FullScreenDetector {
             display: displayBounds,
             onScreenWindows: frontmostWindowBounds
         ) {
-        case true:
+        case .some(true):
             return true
-        case false:
+        case .some(false):
             // Some apps implement a custom full-screen window while reporting
             // AXFullScreen=false. Accept that only when it covers the complete
             // display; the looser fallback below would include maximized windows.
@@ -649,7 +649,7 @@ private enum FullScreenDetector {
                 display: displayBounds,
                 minimumAreaCoverage: 0.995
             )
-        case nil:
+        case .none:
             // Chrome composes its full-screen UI from several layer-0 surfaces
             // (content, toolbar, tab strip). No individual surface is tall
             // enough, but together they cover the same area as a native window.
