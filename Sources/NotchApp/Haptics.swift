@@ -17,7 +17,7 @@ enum Haptics {
     }
 
     /// A single crisp tap, matching the feel of snapping to an alignment guide.
-    static func overlayDidExpand() {
+    static func overlayDidSnap() {
         guard isEnabled else { return }
         let now = Date()
         guard now.timeIntervalSince(lastFired) >= minimumInterval else { return }

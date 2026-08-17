@@ -27,6 +27,8 @@ When Codex CLI or Claude Code is working, the notch quietly grows a little wider
 
 Expanding and collapsing under the pointer give a Force Touch haptic tap, so the notch feels like a physical control rather than a hover tooltip. Auto-expansion (when an agent needs your attention) stays silent on purpose.
 
+Push two fingers toward the island to hide it completely, even from compact mode. Pull two fingers away from the same top-center area to bring it back. The gesture can be disabled from the menu bar.
+
 No notch on your display? It falls back to a centered pill hanging from the top edge, so it works on external monitors, older MacBooks, and with the lid closed.
 
 ---
@@ -126,7 +128,7 @@ States are `idle`, `thinking`, `working`, `waiting`, `done`, and `error`. When s
 
 ## Menu bar
 
-A menu bar item offers hook installation, a toggle to force virtual-notch mode, the auto-expand and haptic preferences, the demo, and quit. **Hide overlay in full screen** is enabled by default and can be toggled from this menu; the preference persists across restarts.
+A menu bar item offers hook installation, a toggle to use the floating pill instead of the hardware notch, the auto-expand, swipe, and haptic preferences, the demo, and quit. **Hide overlay in full screen** is enabled by default and can be toggled from this menu; the preference persists across restarts.
 
 ## Environment variables
 

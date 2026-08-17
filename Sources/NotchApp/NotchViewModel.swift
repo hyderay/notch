@@ -19,6 +19,7 @@ final class NotchViewModel: ObservableObject {
     @Published private(set) var presentation: NotchPresentation = .hidden
     @Published private(set) var geometry: NotchGeometry
     @Published var hoveredSessionID: String?
+    private(set) var isGestureHidden = false
 
     private let store: SessionStore
     private(set) var isHovering = false
@@ -26,6 +27,8 @@ final class NotchViewModel: ObservableObject {
     private var autoExpandDeadline: Date?
     private var autoExpandTimer: Timer?
     private var lastGlobalState: SessionState = .idle
+    /// Restoring under the cursor should show compact first, not immediately hover-open.
+    private var suppressHoverUntilExit = false
 
     /// Called whenever the window needs a new frame.
     var onLayoutChange: ((CGSize) -> Void)?
@@ -47,6 +50,10 @@ final class NotchViewModel: ObservableObject {
         let previousState = lastGlobalState
         snapshot = next
         lastGlobalState = next.globalState
+        if next.sessions.isEmpty {
+            isGestureHidden = false
+            suppressHoverUntilExit = false
+        }
 
         if Settings.shared.autoExpandOnAttention,
            next.globalState != previousState,
@@ -70,6 +77,10 @@ final class NotchViewModel: ObservableObject {
     func setHovering(_ hovering: Bool) {
         hoverWorkItem?.cancel()
         hoverWorkItem = nil
+        if suppressHoverUntilExit {
+            if hovering { return }
+            suppressHoverUntilExit = false
+        }
         // Re-entering while a collapse is queued must cancel that collapse even
         // though `isHovering` is still true.
         if hovering == isHovering { return }
@@ -92,8 +103,33 @@ final class NotchViewModel: ObservableObject {
         isHovering = hovering
         updatePresentation()
         if presentation == .expanded, before != .expanded {
-            Haptics.overlayDidExpand()
+            Haptics.overlayDidSnap()
         }
+        onStateChange?()
+    }
+
+    /// Directional two-finger sweeps hide or restore the whole island.
+    func setGestureHidden(_ hidden: Bool) {
+        guard Settings.shared.swipeGestures, !snapshot.sessions.isEmpty else { return }
+        guard hidden != isGestureHidden else { return }
+        let before = presentation
+        hoverWorkItem?.cancel()
+        hoverWorkItem = nil
+        isGestureHidden = hidden
+        isHovering = false
+        suppressHoverUntilExit = !isGestureHidden
+        updatePresentation()
+        if presentation != before {
+            Haptics.overlayDidSnap()
+        }
+        onStateChange?()
+    }
+
+    func resetGestureHidden() {
+        guard isGestureHidden else { return }
+        isGestureHidden = false
+        suppressHoverUntilExit = true
+        updatePresentation()
         onStateChange?()
     }
 
@@ -119,6 +155,8 @@ final class NotchViewModel: ObservableObject {
     private func updatePresentation() {
         let next: NotchPresentation
         if snapshot.sessions.isEmpty {
+            next = .hidden
+        } else if isGestureHidden {
             next = .hidden
         } else if isHovering || wantsAutoExpand || snapshot.sessions.contains(where: { $0.state == .waiting }) {
             next = .expanded

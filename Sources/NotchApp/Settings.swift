@@ -14,6 +14,7 @@ final class Settings {
         static let watchClaude = "watchClaude"
         static let forceVirtualNotch = "forceVirtualNotch"
         static let hapticFeedback = "hapticFeedback"
+        static let swipeGestures = "swipeGestures"
     }
 
     private init() {
@@ -24,6 +25,7 @@ final class Settings {
             Key.watchClaude: true,
             Key.forceVirtualNotch: false,
             Key.hapticFeedback: true,
+            Key.swipeGestures: true,
         ])
     }
 
@@ -50,6 +52,11 @@ final class Settings {
     var hapticFeedback: Bool {
         get { defaults.bool(forKey: Key.hapticFeedback) }
         set { defaults.set(newValue, forKey: Key.hapticFeedback) }
+    }
+
+    var swipeGestures: Bool {
+        get { defaults.bool(forKey: Key.swipeGestures) }
+        set { defaults.set(newValue, forKey: Key.swipeGestures) }
     }
 
     var forceVirtualNotch: Bool {

@@ -1,4 +1,5 @@
 import AppKit
+import NotchCore
 import SwiftUI
 
 /// Borderless overlay panel that floats above the menu bar on every Space.
@@ -104,5 +105,88 @@ final class HoverMonitor {
         guard inside != isInside else { return }
         isInside = inside
         onChange(inside)
+    }
+}
+
+/// Recognizes a deliberate two-finger vertical trackpad sweep over the island.
+///
+/// This monitor remains active after the panel is ordered out, allowing the same
+/// gesture in the top-center hot zone to bring a dismissed island back.
+@MainActor
+final class TwoFingerSwipeMonitor {
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
+    private let hitRegion: () -> CGRect?
+    private let onSwipe: (IslandSwipeIntent) -> Void
+    private var horizontalTotal: CGFloat = 0
+    private var verticalTotal: CGFloat = 0
+    private var didTrigger = false
+    private var lastEventAt = Date.distantPast
+
+    init(
+        hitRegion: @escaping () -> CGRect?,
+        onSwipe: @escaping (IslandSwipeIntent) -> Void
+    ) {
+        self.hitRegion = hitRegion
+        self.onSwipe = onSwipe
+    }
+
+    func start() {
+        guard globalMonitor == nil else { return }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            MainActor.assumeIsolated { self?.handle(event) }
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            MainActor.assumeIsolated { self?.handle(event) }
+            return event
+        }
+    }
+
+    func stop() {
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        globalMonitor = nil
+        localMonitor = nil
+        reset()
+    }
+
+    private func handle(_ event: NSEvent) {
+        guard event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else { return }
+        let now = Date()
+        if event.phase.contains(.began) || now.timeIntervalSince(lastEventAt) > 0.3 {
+            reset()
+        }
+        lastEventAt = now
+
+        guard let region = hitRegion(), region.contains(NSEvent.mouseLocation) else {
+            if event.phase.contains(.ended) || event.phase.contains(.cancelled) { reset() }
+            return
+        }
+
+        // Remove the user's natural-scrolling preference so this represents
+        // physical finger motion: positive Y is toward the top-screen notch.
+        horizontalTotal += IslandSwipeGesture.physicalDelta(
+            event.scrollingDeltaX,
+            directionInverted: event.isDirectionInvertedFromDevice
+        )
+        verticalTotal += IslandSwipeGesture.physicalDelta(
+            event.scrollingDeltaY,
+            directionInverted: event.isDirectionInvertedFromDevice
+        )
+        if !didTrigger,
+           let intent = IslandSwipeGesture.intent(vertical: verticalTotal, horizontal: horizontalTotal) {
+            didTrigger = true
+            onSwipe(intent)
+        }
+
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+            reset()
+        }
+    }
+
+    private func reset() {
+        horizontalTotal = 0
+        verticalTotal = 0
+        didTrigger = false
     }
 }

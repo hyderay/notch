@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import NotchCore
 import SwiftUI
 
@@ -9,10 +10,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: NotchPanel!
     private var hostingView: NSHostingView<NotchRootView>!
     private var hoverMonitor: HoverMonitor!
+    private var twoFingerSwipeMonitor: TwoFingerSwipeMonitor!
     private var sources: [StatusSource] = []
     private var statusItem: NSStatusItem?
     private var pruneTimer: Timer?
-    private var fullScreenUpdateWorkItem: DispatchWorkItem?
+    private var fullScreenUpdateWorkItems: [DispatchWorkItem] = []
     private var fullScreenActive = false
 
     /// Coalesces bursts of source updates into one main-thread refresh.
@@ -61,8 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         pruneTimer?.invalidate()
-        fullScreenUpdateWorkItem?.cancel()
+        fullScreenUpdateWorkItems.forEach { $0.cancel() }
+        fullScreenUpdateWorkItems.removeAll()
         hoverMonitor?.stop()
+        twoFingerSwipeMonitor?.stop()
         sources.forEach { $0.stop() }
         sources.removeAll()
     }
@@ -85,6 +89,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.model.setHovering(hovering)
             }
         )
+        twoFingerSwipeMonitor = TwoFingerSwipeMonitor(
+            hitRegion: { [weak self] in self?.twoFingerSwipeHitRegion },
+            onSwipe: { [weak self] intent in
+                let hidden = intent == .hide
+                Log.debug("two-finger swipe: \(hidden ? "hide" : "show")")
+                self?.model.setGestureHidden(hidden)
+            }
+        )
+        twoFingerSwipeMonitor.start()
     }
 
     /// Entering requires the cursor to be on the drawn strip; leaving requires
@@ -104,6 +117,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             y: frame.maxY - content.height - enterSlop,
             width: content.width,
             height: content.height + enterSlop
+        )
+    }
+
+    /// Stays available while gesture-hidden so a second sweep can restore it.
+    private var twoFingerSwipeHitRegion: CGRect? {
+        guard Settings.shared.swipeGestures,
+              !model.snapshot.sessions.isEmpty,
+              !isHiddenForFullScreen
+        else { return nil }
+        let geometry = model.geometry
+        let height = geometry.notchHeight + CompactView.activityHeight + 12
+        return CGRect(
+            x: geometry.screenFrame.midX - geometry.bodyWidth / 2,
+            y: geometry.screenFrame.maxY - height,
+            width: geometry.bodyWidth,
+            height: height
         )
     }
 
@@ -127,7 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(install)
 
         let virtual = NSMenuItem(
-            title: "Force virtual notch",
+            title: "Use floating pill instead of hardware notch",
             action: #selector(toggleVirtualNotch),
             keyEquivalent: ""
         )
@@ -152,6 +181,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         haptics.target = self
         haptics.state = Settings.shared.hapticFeedback ? .on : .off
         menu.addItem(haptics)
+
+        let swipeGestures = NSMenuItem(
+            title: "Two-finger push to hide or show",
+            action: #selector(toggleSwipeGestures),
+            keyEquivalent: ""
+        )
+        swipeGestures.target = self
+        swipeGestures.state = Settings.shared.swipeGestures ? .on : .off
+        menu.addItem(swipeGestures)
 
         let hideInFullScreen = NSMenuItem(
             title: "Hide overlay in full screen",
@@ -380,6 +418,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.autoExpanding = autoExpanding
             state.fullScreenActive = fullScreenActive
             state.hideInFullScreen = Settings.shared.hideInFullScreen
+            state.gestureHidden = model.isGestureHidden
+            state.swipeGestures = Settings.shared.swipeGestures
         }
     }
 
@@ -396,10 +436,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func scheduleFullScreenRefresh() {
-        fullScreenUpdateWorkItem?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.refreshFullScreenState() }
-        fullScreenUpdateWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
+        fullScreenUpdateWorkItems.forEach { $0.cancel() }
+        fullScreenUpdateWorkItems = [0.12, 0.5, 1.0].map { delay in
+            let work = DispatchWorkItem { [weak self] in self?.refreshFullScreenState() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+            return work
+        }
     }
 
     @objc private func screenParametersChanged() {
@@ -449,7 +491,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleHaptics(_ sender: NSMenuItem) {
         Haptics.isEnabled.toggle()
         sender.state = Haptics.isEnabled ? .on : .off
-        if Haptics.isEnabled { Haptics.overlayDidExpand() }
+        if Haptics.isEnabled { Haptics.overlayDidSnap() }
+    }
+
+    @objc private func toggleSwipeGestures(_ sender: NSMenuItem) {
+        Settings.shared.swipeGestures.toggle()
+        sender.state = Settings.shared.swipeGestures ? .on : .off
+        if !Settings.shared.swipeGestures {
+            model.resetGestureHidden()
+        }
+        publishDebugState()
     }
 
     @objc private func runDemo() {
@@ -479,6 +530,10 @@ private enum FullScreenDetector {
               let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         else { return false }
 
+        if let fullScreen = accessibilityFullScreenState(processID: frontmostPID) {
+            return fullScreen
+        }
+
         let displayBounds = CGDisplayBounds(CGDirectDisplayID(screenNumber.uint32Value))
         guard let windows = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
@@ -492,11 +547,44 @@ private enum FullScreenDetector {
                   let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
             else { return false }
 
-            let tolerance: CGFloat = 2
-            return abs(bounds.minX - displayBounds.minX) <= tolerance
-                && abs(bounds.minY - displayBounds.minY) <= tolerance
-                && abs(bounds.width - displayBounds.width) <= tolerance
-                && abs(bounds.height - displayBounds.height) <= tolerance
+            return coversDisplay(window: bounds, display: displayBounds)
         }
+    }
+
+    /// Native full-screen windows on notched Macs deliberately leave the camera
+    /// band outside their bounds, so geometry alone cannot identify them. AppKit
+    /// exposes the authoritative state through the focused window's AX attribute.
+    private static func accessibilityFullScreenState(processID: pid_t) -> Bool? {
+        let application = AXUIElementCreateApplication(processID)
+        var focusedValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            application,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedValue
+        ) == .success, let focusedValue else { return nil }
+
+        let focusedWindow = focusedValue as! AXUIElement
+        var fullScreenValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            focusedWindow,
+            "AXFullScreen" as CFString,
+            &fullScreenValue
+        ) == .success else { return nil }
+        return (fullScreenValue as? NSNumber)?.boolValue
+    }
+
+    /// Full-screen windows occasionally overscan by a few points during Space
+    /// transitions, so compare coverage rather than requiring byte-identical
+    /// bounds. The high area threshold still excludes ordinary maximized windows
+    /// that leave the menu bar visible.
+    static func coversDisplay(window: CGRect, display: CGRect) -> Bool {
+        guard display.width > 0, display.height > 0 else { return false }
+        let intersection = window.intersection(display)
+        guard !intersection.isNull else { return false }
+
+        let widthCoverage = intersection.width / display.width
+        let heightCoverage = intersection.height / display.height
+        let bottomAligned = abs(window.maxY - display.maxY) <= 4
+        return widthCoverage >= 0.99 && heightCoverage >= 0.94 && bottomAligned
     }
 }

@@ -24,6 +24,8 @@ final class OverlayDebugState: @unchecked Sendable {
         var autoExpanding = false
         var fullScreenActive = false
         var hideInFullScreen = true
+        var gestureHidden = false
+        var swipeGestures = true
     }
 
     static let shared = OverlayDebugState()
@@ -64,6 +66,8 @@ final class OverlayDebugState: @unchecked Sendable {
             "autoExpanding": s.autoExpanding,
             "fullScreenActive": s.fullScreenActive,
             "hideInFullScreen": s.hideInFullScreen,
+            "gestureHidden": s.gestureHidden,
+            "swipeGestures": s.swipeGestures,
         ]
     }
 }
