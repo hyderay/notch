@@ -1,0 +1,15 @@
+---
+description: Every acceptance must measure CPU and memory leaks
+alwaysApply: true
+---
+
+# Acceptance: CPU and leaks
+
+Do not call a change done until `make check-resources` has been run against the running app and both checks pass.
+
+Required every time (idle and after exercise):
+
+1. **CPU** — idle average must stay at ~0% (fail above 1.0%). A visible busy overlay may use a little CPU for the spinner; it must drop back when hidden.
+2. **Memory** — RSS must be flat at idle (no climb across samples). After creating and removing a session, RSS must return near the idle baseline. Run `leaks` on the Notch PID. Fail only if stacks point at our code (`Notch` / `NotchCore`). NSXPC/AppIntents cycles on ad-hoc signed GUI apps are noise — do not fail on those.
+
+Use `scripts/check-resources.sh` (via `make check-resources`). Quote the idle CPU, RSS, and `leaks` result in the acceptance summary. If the script cannot run, do the same measurements by hand (`ps`, `leaks`) — do not skip them.
