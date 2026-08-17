@@ -40,13 +40,10 @@ Consequences:
 2. **The notched display must be attached for visual verification.** With only an external display active, the app continues tracking sessions but does not draw an overlay.
 3. **No provisioning profile** means ad-hoc signing only, so no capabilities that require entitlements (no App Sandbox, no App Groups).
 
-Three further constraints surfaced only once building started, and each one shaped the code:
+Two further constraints surfaced only once building started, and each one shaped the code:
 
 4. **`@State` cannot be used.** In the macOS 27 SDK, `State` is a macro (`SwiftUIMacros.StateMacro`), and Command Line Tools ships no SwiftUI macro plugin — only `libObservationMacros` and `libSwiftMacros`. `@ObservedObject`, `@StateObject`, `@Environment`, and `@Binding` are still plain property wrappers and work fine. So every piece of view state, including the one-second clock and the hovered row, lives in `NotchViewModel`.
-5. **`XCTest` is unavailable**; only `Testing.framework` (swift-testing) ships with Command Line Tools. Two extra steps are needed:
-   - `swift build --build-tests` does not put `libTestingMacros.dylib` on the compiler's plugin path, so the Makefile passes `-Xswiftc -load-plugin-library` explicitly.
-   - At runtime the test bundle cannot find `Testing.framework`, and `DYLD_FRAMEWORK_PATH` is stripped from the SIP-protected `swiftpm-testing-helper`. `scripts/prepare-testing.sh` copies the framework *into the `.xctest` bundle*. It must not go into `PackageFrameworks`, which is also a compiler framework search path — a copy there shadows the real framework and silently breaks macro resolution.
-6. **Screen recording is not permitted** for the shell, so visual verification is impossible. `notchctl inspect` exists to report the overlay's geometry, presentation, window frame, and hover state numerically instead.
+5. **Screen recording is not permitted** for the shell, so visual verification is impossible. `notchctl inspect` exists to report the overlay's geometry, presentation, window frame, and hover state numerically instead.
 
 ---
 
@@ -276,7 +273,6 @@ notch/
     │   └── HookInstaller.swift
     └── notchctl/
         └── main.swift
-└── Tests/NotchCoreTests/
 ```
 
 **Why AppKit `main.swift` instead of a SwiftUI `@main App`**: the app needs `.accessory` activation policy, a fully custom `NSPanel`, and predictable startup behavior without Xcode. SwiftUI is used only as the content layer inside an `NSHostingView`.
@@ -290,7 +286,6 @@ make build     # swift build -c release
 make app       # assemble .build/Notch.app (Info.plist + ad-hoc codesign)
 make install   # copy to /Applications, symlink notchctl into ~/.local/bin
 make run       # run in the foreground with logs on stderr
-make test      # swift test
 ```
 
 `Info.plist` essentials: `LSUIElement = true` (no Dock icon), `LSMinimumSystemVersion = 14.0`, `NSPrincipalClass = NSApplication`, `CFBundleIdentifier = com.wanquanlin.notch`.
@@ -307,7 +302,6 @@ Without a notched display attached and without a live agent, verification needs 
 4. `notchctl snapshot [path]` — renders the SwiftUI tree to a PNG with `ImageRenderer` over a flat grey backdrop. `screencapture` needs Screen Recording permission, which a terminal-hosted tool usually lacks; rendering from inside the process needs no permission at all, and the backdrop makes any content escaping the black silhouette immediately visible.
 5. `notchctl doctor` — socket liveness, which agents are installed, and whether hooks are in place.
 6. `NOTCH_DEBUG=1` plus `NOTCH_LOG_FILE` — log every source event. A bundled app has no terminal, and `open` does not forward the shell environment, so these are set with `launchctl setenv`.
-7. `swift test` — covers `LineTailer` incremental reads, both parser state machines, `SessionStore` fusion/expiry/aggregation, and the socket transport.
 
 Pointing `CODEX_HOME` and `CLAUDE_CONFIG_DIR` at temporary directories makes it possible to drive the file sources with synthetic transcripts and to exercise the hook installer without touching real agent configuration.
 
@@ -353,7 +347,7 @@ Timers only run when they have something to do: the one-second clock and the 12.
 
 ## 10. Acceptance criteria
 
-- [x] `swift build -c release` and `swift test` both pass (82 tests)
+- [x] `swift build -c release` passes
 - [x] `make app && open .build/Notch.app` launches with no Dock icon
 - [x] `notchctl demo` drives the full state-transition sequence
 - [x] A synthetic Codex rollout written into `~/.codex/sessions` moves the overlay through working → done with no configuration

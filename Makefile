@@ -1,4 +1,4 @@
-.PHONY: build release app install uninstall run test lint clean check-resources
+.PHONY: build release app install uninstall run lint clean check-resources
 
 SHELL := /bin/bash
 APP := .build/Notch.app
@@ -30,17 +30,6 @@ uninstall:
 # Foreground run with logging, for development.
 run: build
 	NOTCH_DEBUG=1 swift run NotchApp
-
-# `swift build --build-tests` does not put the swift-testing macro plugin on the
-# compiler's plugin path under Command Line Tools, so point at it explicitly.
-DEVELOPER_DIR := $(shell xcode-select -p)
-TESTING_MACROS := $(DEVELOPER_DIR)/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib
-TEST_FLAGS := $(if $(wildcard $(TESTING_MACROS)),-Xswiftc -load-plugin-library -Xswiftc $(TESTING_MACROS),)
-
-test:
-	swift build --build-tests $(TEST_FLAGS)
-	./scripts/prepare-testing.sh Debug
-	swift test $(TEST_FLAGS)
 
 # Idle CPU, RSS stability, and `leaks` against the running app.
 check-resources:

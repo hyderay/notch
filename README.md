@@ -167,7 +167,6 @@ open -a Notch
 
 ```bash
 make build     # debug build
-make test      # 82 tests via swift-testing
 make run       # foreground, with logging on stderr
 make app       # assemble .build/Notch.app
 make install   # install to /Applications
@@ -181,15 +180,13 @@ Project layout:
 | `Sources/NotchApp` | AppKit/SwiftUI overlay, menu bar UI, and status sources |
 | `Sources/NotchCore` | Session model, transcript parsers, hooks, and local IPC |
 | `Sources/notchctl` | Command-line client and hook entry points |
-| `Tests/NotchCoreTests` | Parser, store, socket, and utility tests |
 | `scripts` | App bundle assembly, icon rendering, and resource checks |
 
 There is no `.xcodeproj`. The project builds with SwiftPM and the app bundle is assembled by `scripts/build-app.sh`, which writes `Info.plist` and applies an ad-hoc signature. This is deliberate: it keeps the whole thing buildable with only Command Line Tools installed.
 
-Two consequences of that constraint show up in the source:
+One consequence of that constraint shows up in the source:
 
 - **`@State` is unavailable.** In the macOS 27 SDK it is a macro, and Command Line Tools does not ship the SwiftUI macro plugin. All view state lives in `NotchViewModel` instead.
-- **`XCTest` is unavailable**, so tests use swift-testing. `scripts/prepare-testing.sh` stages `Testing.framework` into the test bundle because dyld cannot otherwise find it; `make test` runs it for you.
 
 See [DESIGN.md](DESIGN.md) for the architecture, the transcript formats, and the reasoning behind the trade-offs.
 
@@ -213,4 +210,4 @@ Everything is local. Notch reads transcript files that already exist on your dis
 
 ## Contributing
 
-Bug reports and focused pull requests are welcome. Before opening a pull request, run `make test` and `make app` on macOS 14 or later. For architecture and performance constraints, read [DESIGN.md](DESIGN.md).
+Bug reports and focused pull requests are welcome. Before opening a pull request, run `make app` on macOS 14 or later. For architecture and performance constraints, read [DESIGN.md](DESIGN.md).

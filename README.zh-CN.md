@@ -99,7 +99,7 @@ notchctl uninstall-hooks
 任何本地工具都可以向 Notch 推送状态：
 
 ```bash
-notchctl working --agent codex --session build-42 --title my-app --detail "swift test"
+notchctl working --agent codex --session build-42 --title my-app --detail "swift build"
 notchctl waiting --agent codex --session build-42 --detail "等待确认"
 notchctl done    --agent codex --session build-42
 notchctl remove  --agent codex --session build-42
@@ -123,7 +123,6 @@ Notch 只读取本机已有的会话文件，状态仅保存在内存中，不�
 
 ```bash
 make build
-make test
 make app
 make install
 make check-resources
