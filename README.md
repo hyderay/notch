@@ -55,6 +55,14 @@ Push two fingers toward the island to hide it completely, even from compact mode
 
 ## Install
 
+### Homebrew
+
+```bash
+brew install --cask --no-quarantine hyderay/tap/notch
+```
+
+Release builds are ad-hoc signed, so the `--no-quarantine` flag is required until notarized builds are available.
+
 ### Download a release
 
 1. Download `Notch-v*-macOS.zip` from the [latest release](https://github.com/hyderay/notch/releases/latest).
