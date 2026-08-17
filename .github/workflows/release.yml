@@ -27,8 +27,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "Notch-${GITHUB_REF_NAME}-macOS.zip" \
-            "Notch-${GITHUB_REF_NAME}-macOS.zip.sha256" \
-            --generate-notes \
-            --title "Notch ${GITHUB_REF_NAME}"
+          ensure_release() {
+            for attempt in {1..6}; do
+              gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && return 0
+              gh release create "$GITHUB_REF_NAME" \
+                --generate-notes \
+                --title "Notch ${GITHUB_REF_NAME}" && return 0
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
+
+          upload_assets() {
+            for attempt in {1..6}; do
+              gh release upload "$GITHUB_REF_NAME" \
+                "Notch-${GITHUB_REF_NAME}-macOS.zip" \
+                "Notch-${GITHUB_REF_NAME}-macOS.zip.sha256" \
+                --clobber && return 0
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
+
+          ensure_release
+          upload_assets
