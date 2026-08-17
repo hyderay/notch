@@ -10,6 +10,10 @@
 
 Shows what your AI coding agents are doing, in the MacBook notch.
 
+<p align="center">
+  <img src="Resources/NotchExpanded.png" width="760" alt="Notch showing Codex CLI and Claude Code sessions">
+</p>
+
 When Codex CLI or Claude Code is working, the notch quietly grows a little wider and shows a spinner plus a timer. Hover it and it drops down into a panel listing every live session, what each one is doing right now, and how long it has been at it. When nothing is running, it disappears completely.
 
 ```
@@ -29,15 +33,13 @@ Expanding and collapsing under the pointer give a Force Touch haptic tap, so the
 
 Push two fingers toward the island to hide it completely, even from compact mode. Pull two fingers away from the same top-center area to bring it back. The gesture can be disabled from the menu bar.
 
-No notch on your display? It falls back to a centered pill hanging from the top edge, so it works on external monitors, older MacBooks, and with the lid closed.
-
 ---
 
 ## Highlights
 
 - Tracks Codex CLI and Claude Code automatically from their local transcripts
 - Shows concurrent sessions, current activity, elapsed time, and approval prompts
-- Works on both notched and non-notched displays
+- Integrates directly with the hardware notch on supported MacBooks
 - Provides optional agent hooks for more precise status updates
 - Exposes a local `notchctl` interface for scripts and other agents
 - Stays local: no accounts, analytics, or network requests
@@ -47,6 +49,7 @@ No notch on your display? It falls back to a centered pill hanging from the top 
 ## Requirements
 
 - macOS 14 or later (built and tested on macOS 27)
+- A MacBook display with a hardware camera notch
 - Xcode Command Line Tools — **a full Xcode install is not required**
 - Optional: [Codex CLI](https://github.com/openai/codex) and/or [Claude Code](https://claude.com/claude-code)
 
@@ -128,14 +131,13 @@ States are `idle`, `thinking`, `working`, `waiting`, `done`, and `error`. When s
 
 ## Menu bar
 
-A menu bar item offers hook installation, a toggle to use the floating pill instead of the hardware notch, the auto-expand, swipe, and haptic preferences, the demo, and quit. **Hide overlay in full screen** is enabled by default and can be toggled from this menu; the preference persists across restarts.
+A menu bar item offers hook installation, the auto-expand, swipe, and haptic preferences, the demo, and quit. **Hide overlay in full screen** is enabled by default and can be toggled from this menu; the preference persists across restarts.
 
 ## Environment variables
 
 | Variable | Effect |
 | --- | --- |
 | `NOTCH_SOCKET` | Override the IPC socket path (default `~/.notch/notch.sock`) |
-| `NOTCH_FORCE_VIRTUAL=1` | Use the virtual notch even on a notched display |
 | `NOTCH_DEBUG=1` | Log every source event |
 | `NOTCH_LOG_FILE` | Send logs to a file instead of stderr |
 | `CODEX_HOME`, `CLAUDE_CONFIG_DIR` | Point at non-default agent config directories |
@@ -152,7 +154,7 @@ open -a Notch
 
 ```bash
 make build     # debug build
-make test      # 74 tests via swift-testing
+make test      # 82 tests via swift-testing
 make run       # foreground, with logging on stderr
 make app       # assemble .build/Notch.app
 make install   # install to /Applications
@@ -190,7 +192,7 @@ Measured on an M3 Pro, Release build, no debug logging. Prefer Activity Monitor 
 
 RSS looks higher (~60–75 MB) because it counts the dyld shared cache; that is not leak. `leaks` on an ad-hoc GUI app also reports ~20 KB of system NSXPC cycles — ignore those unless a stack lands in `Notch` / `NotchCore`.
 
-Watchers are event-driven (FSEvents), not polling. The spinner is a Core Animation layer. See [MAINTENANCE.md](MAINTENANCE.md) for budgets, `make check-resources`, and what counts as a real regression.
+Watchers are event-driven (FSEvents), not polling. The spinner is a Core Animation layer. Run `make check-resources` to verify the CPU and memory budgets after runtime changes.
 
 ## Privacy
 
@@ -198,4 +200,4 @@ Everything is local. Notch reads transcript files that already exist on your dis
 
 ## Contributing
 
-Bug reports and focused pull requests are welcome. Before opening a pull request, run `make test` and `make app` on macOS 14 or later. For architecture and performance constraints, read [DESIGN.md](DESIGN.md) and [MAINTENANCE.md](MAINTENANCE.md).
+Bug reports and focused pull requests are welcome. Before opening a pull request, run `make test` and `make app` on macOS 14 or later. For architecture and performance constraints, read [DESIGN.md](DESIGN.md).

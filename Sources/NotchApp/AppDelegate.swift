@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        Log.debug("started; notch=\(model.geometry.hasRealNotch ? "real" : "virtual") socket=\(NotchPaths.socket.path)")
+        Log.debug("started; notch=\(model.geometry.hasRealNotch ? "detected" : "unavailable") socket=\(NotchPaths.socket.path)")
         refreshFullScreenState()
         applyLayout()
     }
@@ -122,7 +122,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Stays available while gesture-hidden so a second sweep can restore it.
     private var twoFingerSwipeHitRegion: CGRect? {
-        guard Settings.shared.swipeGestures,
+        guard model.geometry.hasRealNotch,
+              Settings.shared.swipeGestures,
               !model.snapshot.sessions.isEmpty,
               !isHiddenForFullScreen
         else { return nil }
@@ -154,15 +155,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         install.target = self
         menu.addItem(install)
-
-        let virtual = NSMenuItem(
-            title: "Use floating pill instead of hardware notch",
-            action: #selector(toggleVirtualNotch),
-            keyEquivalent: ""
-        )
-        virtual.target = self
-        virtual.state = Settings.shared.forceVirtualNotch ? .on : .off
-        menu.addItem(virtual)
 
         let autoExpand = NSMenuItem(
             title: "Auto-expand when attention is needed",
@@ -355,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let generation = layoutGeneration
         let target = model.windowFrame
 
-        if isHiddenForFullScreen {
+        if !model.geometry.hasRealNotch || isHiddenForFullScreen {
             hoverMonitor.stop()
             model.setHovering(false)
             panel.ignoresMouseEvents = true
@@ -467,13 +459,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
-    }
-
-    @objc private func toggleVirtualNotch(_ sender: NSMenuItem) {
-        Settings.shared.forceVirtualNotch.toggle()
-        sender.state = Settings.shared.forceVirtualNotch ? .on : .off
-        model.recomputeGeometry()
-        applyLayout()
     }
 
     @objc private func toggleAutoExpand(_ sender: NSMenuItem) {

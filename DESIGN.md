@@ -12,7 +12,7 @@ A background macOS app that shows what your AI coding agents (Codex CLI, Claude 
 | Zero-config | Works with no hooks installed, by reading the transcript files agents already write |
 | High fidelity when opted in | With hooks installed, surface tool names, precise turn boundaries, and prompts awaiting approval |
 | Multi-session | Aggregate several concurrent agents; expand to see the full list |
-| Graceful fallback | On external displays / older Macs / closed lid, degrade to a centered "virtual notch" pill |
+| Hardware-native | Render only into a MacBook display with a physical camera notch |
 | Lightweight | No Dock icon, near-zero CPU when idle |
 
 ### Non-goals
@@ -37,7 +37,7 @@ Active display          external AOC Q24G51F only, safeAreaInsets.top == 0
 Consequences:
 
 1. **No Xcode** means no `xcodebuild` and no `.xcodeproj`. Build with **SwiftPM, then assemble the `.app` bundle from a script** (hand-written `Info.plist`, ad-hoc `codesign --sign -`).
-2. **No notched display is currently attached**, so virtual-notch mode has to be a first-class path or there is nothing to verify during development.
+2. **The notched display must be attached for visual verification.** With only an external display active, the app continues tracking sessions but does not draw an overlay.
 3. **No provisioning profile** means ad-hoc signing only, so no capabilities that require entitlements (no App Sandbox, no App Groups).
 
 Three further constraints surfaced only once building started, and each one shaped the code:
@@ -169,17 +169,13 @@ Sizing strategy: the window is created at the **maximum expanded size and never 
 ### 4.2 Notch geometry
 
 ```
-targetScreen = the NSScreen with safeAreaInsets.top > 0   (real notch)
-             ?? NSScreen.main                             (virtual notch)
+targetScreen = the NSScreen with safeAreaInsets.top > 0
 
 Real notch:
   notchHeight = safeAreaInsets.top                     (~32pt on M3 Pro 14")
   notchWidth  = frame.width - auxLeft.width - auxRight.width
                 fall back to screenW * 0.1565 clamped to 180...230 when
                 auxiliaryTopLeftArea is nil
-Virtual notch:
-  notchHeight = NSStatusBar.system.thickness clamped to 22...32
-  notchWidth  = 200
 Origin:
   x = screen.frame.midX - notchWidth / 2
   y = screen.frame.maxY - notchHeight
@@ -306,9 +302,8 @@ Without a notched display attached and without a live agent, verification needs 
 3. `notchctl inspect` — prints the overlay's presentation, geometry, window frame, hover state, and visibility.
 4. `notchctl snapshot [path]` — renders the SwiftUI tree to a PNG with `ImageRenderer` over a flat grey backdrop. `screencapture` needs Screen Recording permission, which a terminal-hosted tool usually lacks; rendering from inside the process needs no permission at all, and the backdrop makes any content escaping the black silhouette immediately visible.
 5. `notchctl doctor` — socket liveness, which agents are installed, and whether hooks are in place.
-6. `NOTCH_FORCE_VIRTUAL=1` — force virtual-notch mode even when a notched display is attached.
-7. `NOTCH_DEBUG=1` plus `NOTCH_LOG_FILE` — log every source event. A bundled app has no terminal, and `open` does not forward the shell environment, so these are set with `launchctl setenv`.
-8. `swift test` — covers `LineTailer` incremental reads, both parser state machines, `SessionStore` fusion/expiry/aggregation, and the socket transport.
+6. `NOTCH_DEBUG=1` plus `NOTCH_LOG_FILE` — log every source event. A bundled app has no terminal, and `open` does not forward the shell environment, so these are set with `launchctl setenv`.
+7. `swift test` — covers `LineTailer` incremental reads, both parser state machines, `SessionStore` fusion/expiry/aggregation, and the socket transport.
 
 Pointing `CODEX_HOME` and `CLAUDE_CONFIG_DIR` at temporary directories makes it possible to drive the file sources with synthetic transcripts and to exercise the hook installer without touching real agent configuration.
 
@@ -346,7 +341,7 @@ Timers only run when they have something to do: the one-second clock and the 12.
 | Clobbering an existing codex `notify` or claude hook | The installer writes idempotently and additively; on conflict it prints manual merge instructions and exits |
 | Transcript monitoring drains battery | FSEvents and vnode notifications sleep at rest; Codex process probes run only while a session reports busy work |
 | Socket permissions | `~/.notch` is `0700` and the socket `0600`; local connections only; stale sockets are cleaned at startup |
-| Geometry breaks when displays change or the lid closes | Full recompute on `didChangeScreenParameters` |
+| Geometry breaks when displays change or the lid closes | Full recompute on `didChangeScreenParameters`; hide unless the notched display is active |
 | Two instances running at once | At startup, connecting to the existing socket proves another instance is alive, and the new one exits |
 | Gatekeeper blocks the ad-hoc signature | README documents right-click-open or `xattr -dr com.apple.quarantine` |
 
@@ -354,11 +349,11 @@ Timers only run when they have something to do: the one-second clock and the 12.
 
 ## 10. Acceptance criteria
 
-- [x] `swift build -c release` and `swift test` both pass (75 tests)
+- [x] `swift build -c release` and `swift test` both pass (82 tests)
 - [x] `make app && open .build/Notch.app` launches with no Dock icon
 - [x] `notchctl demo` drives the full state-transition sequence
 - [x] A synthetic Codex rollout written into `~/.codex/sessions` moves the overlay through working → done with no configuration
-- [x] The virtual notch pill is centered and clear of menu bar items on a display without a cutout
+- [x] The overlay stays hidden when no notched display is active
 - [x] Idle CPU below 1% (measured 0.0–0.2%)
 - [x] Resident memory flat across 8,000 session events
 - [x] The socket file is removed on quit, and a stale one left by a crash is reclaimed on the next launch

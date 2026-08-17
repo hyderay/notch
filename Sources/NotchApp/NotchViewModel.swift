@@ -39,7 +39,7 @@ final class NotchViewModel: ObservableObject {
 
     init(store: SessionStore) {
         self.store = store
-        self.geometry = NotchGeometry.current(forceVirtual: Settings.shared.forceVirtualNotch)
+        self.geometry = NotchGeometry.current()
     }
 
     // MARK: - Data
@@ -66,7 +66,7 @@ final class NotchViewModel: ObservableObject {
     }
 
     func recomputeGeometry() {
-        let next = NotchGeometry.current(forceVirtual: Settings.shared.forceVirtualNotch)
+        let next = NotchGeometry.current()
         guard next != geometry else { return }
         geometry = next
         onLayoutChange?(contentSize)

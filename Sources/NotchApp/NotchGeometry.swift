@@ -2,15 +2,14 @@ import AppKit
 
 /// Where and how big the notch overlay should be drawn.
 ///
-/// Two modes exist. With a real notch, the overlay grows out of the hardware
-/// cutout and must keep its content clear of the cutout itself. Without one
-/// (external display, older Mac, closed lid) it degrades to a centered pill
-/// hanging from the top edge.
+/// The overlay grows out of a hardware cutout and keeps its content clear of
+/// the cutout itself. Geometry for an unsupported display is retained only so
+/// diagnostics and screen-change handling remain well-defined; it is not drawn.
 struct NotchGeometry: Equatable {
     /// Full frame of the screen the overlay lives on, in AppKit coordinates.
     var screenFrame: CGRect
     var hasRealNotch: Bool
-    /// Width of the hardware cutout; zero in virtual mode.
+    /// Width of the hardware cutout; zero when no notched display is attached.
     var voidWidth: CGFloat
     /// Vertical extent of the overlay's top strip.
     var notchHeight: CGFloat
@@ -32,13 +31,12 @@ struct NotchGeometry: Equatable {
         NSScreen.screens.first { $0.safeAreaInsets.top > 0 }
     }
 
-    static func current(forceVirtual: Bool = false) -> NotchGeometry {
-        let notched = forceVirtual ? nil : notchedScreen()
-        if let screen = notched {
+    static func current() -> NotchGeometry {
+        if let screen = notchedScreen() {
             return real(screen: screen)
         }
         let screen = NSScreen.main ?? NSScreen.screens.first
-        return virtual(screen: screen)
+        return unsupported(screen: screen)
     }
 
     private static func real(screen: NSScreen) -> NotchGeometry {
@@ -65,7 +63,7 @@ struct NotchGeometry: Equatable {
         )
     }
 
-    private static func virtual(screen: NSScreen?) -> NotchGeometry {
+    private static func unsupported(screen: NSScreen?) -> NotchGeometry {
         let frame = screen?.frame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let menuBarHeight: CGFloat
         if let screen {

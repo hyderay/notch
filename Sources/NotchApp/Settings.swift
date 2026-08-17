@@ -1,7 +1,6 @@
 import Foundation
 
-/// User preferences, backed by `UserDefaults` with environment overrides for
-/// the debug switches described in DESIGN.md.
+/// User preferences backed by `UserDefaults`.
 final class Settings {
     static let shared = Settings()
 
@@ -12,7 +11,6 @@ final class Settings {
         static let autoExpandOnAttention = "autoExpandOnAttention"
         static let watchCodex = "watchCodex"
         static let watchClaude = "watchClaude"
-        static let forceVirtualNotch = "forceVirtualNotch"
         static let hapticFeedback = "hapticFeedback"
         static let swipeGestures = "swipeGestures"
     }
@@ -23,7 +21,6 @@ final class Settings {
             Key.autoExpandOnAttention: true,
             Key.watchCodex: true,
             Key.watchClaude: true,
-            Key.forceVirtualNotch: false,
             Key.hapticFeedback: true,
             Key.swipeGestures: true,
         ])
@@ -57,13 +54,5 @@ final class Settings {
     var swipeGestures: Bool {
         get { defaults.bool(forKey: Key.swipeGestures) }
         set { defaults.set(newValue, forKey: Key.swipeGestures) }
-    }
-
-    var forceVirtualNotch: Bool {
-        get {
-            if ProcessInfo.processInfo.environment["NOTCH_FORCE_VIRTUAL"] == "1" { return true }
-            return defaults.bool(forKey: Key.forceVirtualNotch)
-        }
-        set { defaults.set(newValue, forKey: Key.forceVirtualNotch) }
     }
 }
