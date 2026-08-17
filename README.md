@@ -2,6 +2,10 @@
   <img src="Resources/AppIcon.png" width="128" height="128" alt="Notch app icon">
 </p>
 
+<p align="center">
+  English | <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 # Notch
 
 [![CI](https://github.com/hyderay/notch/actions/workflows/ci.yml/badge.svg)](https://github.com/hyderay/notch/actions/workflows/ci.yml)
