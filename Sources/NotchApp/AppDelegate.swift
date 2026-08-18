@@ -19,6 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fullScreenActive = false
     private var fullScreenFadeGeneration: Int?
     private var fullScreenFadeWorkItem: DispatchWorkItem?
+    private var automaticUpdateCheckTask: Task<Void, Never>?
+    private var updateCheckTask: Task<Void, Never>?
+    private var checkForUpdatesMenuItem: NSMenuItem?
 
     /// Coalesces bursts of source updates into one main-thread refresh.
     private var refreshScheduled = false
@@ -62,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.debug("started; notch=\(model.geometry.hasRealNotch ? "detected" : "unavailable") socket=\(NotchPaths.socket.path)")
         refreshFullScreenState()
         applyLayout()
+        scheduleAutomaticUpdateCheck()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -69,6 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fullScreenUpdateWorkItems.forEach { $0.cancel() }
         fullScreenUpdateWorkItems.removeAll()
         fullScreenFadeWorkItem?.cancel()
+        automaticUpdateCheckTask?.cancel()
+        updateCheckTask?.cancel()
         hoverMonitor?.stop()
         twoFingerSwipeMonitor?.stop()
         sources.forEach { $0.stop() }
@@ -96,9 +102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         twoFingerSwipeMonitor = TwoFingerSwipeMonitor(
             hitRegion: { [weak self] in self?.twoFingerSwipeHitRegion },
             onSwipe: { [weak self] intent in
-                let hidden = intent == .hide
-                Log.debug("two-finger swipe: \(hidden ? "hide" : "show")")
-                self?.model.setGestureHidden(hidden)
+                guard let self else { return }
+                let before = self.model.expansionLevel
+                self.model.applyTwoFingerSwipe(intent)
+                Log.debug("two-finger swipe: \(intent), level \(before) -> \(self.model.expansionLevel)")
             }
         )
         twoFingerSwipeMonitor.start()
@@ -110,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hoverHitRegion: CGRect? {
         guard model.presentation != .hidden, !isHiddenForFullScreen else { return nil }
         let frame = panel.frame
-        if model.isHovering { return frame.insetBy(dx: -10, dy: -10) }
+        if model.presentation == .expanded { return frame.insetBy(dx: -10, dy: -10) }
         let content = model.contentSize
         // Extra height below the strip: the compact target is only ~32pt tall
         // and sits under the hardware notch, so a few points of slop makes
@@ -124,7 +131,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    /// Stays available while gesture-hidden so a second sweep can restore it.
     private var twoFingerSwipeHitRegion: CGRect? {
         guard model.geometry.hasRealNotch,
               Settings.shared.swipeGestures,
@@ -170,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(autoExpand)
 
         let haptics = NSMenuItem(
-            title: "Haptic feedback on hover",
+            title: "Haptic feedback on two-finger level changes",
             action: #selector(toggleHaptics),
             keyEquivalent: ""
         )
@@ -179,7 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(haptics)
 
         let swipeGestures = NSMenuItem(
-            title: "Two-finger push to hide or show",
+            title: "Two-finger swipe through levels",
             action: #selector(toggleSwipeGestures),
             keyEquivalent: ""
         )
@@ -201,6 +207,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let demo = NSMenuItem(title: "Run demo sequence", action: #selector(runDemo), keyEquivalent: "")
         demo.target = self
         menu.addItem(demo)
+
+        menu.addItem(.separator())
+
+        let checkForUpdates = NSMenuItem(
+            title: "Check for Updates\u{2026}",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        checkForUpdates.target = self
+        checkForUpdatesMenuItem = checkForUpdates
+        menu.addItem(checkForUpdates)
+
+        let version = NSMenuItem(
+            title: "Notch \(UpdateChecker.currentVersionString)",
+            action: nil,
+            keyEquivalent: ""
+        )
+        version.isEnabled = false
+        menu.addItem(version)
 
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Notch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -493,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.autoExpanding = autoExpanding
             state.fullScreenActive = fullScreenActive
             state.hideInFullScreen = Settings.shared.hideInFullScreen
-            state.gestureHidden = model.isGestureHidden
+            state.expansionLevel = model.expansionLevel
             state.swipeGestures = Settings.shared.swipeGestures
         }
     }
@@ -586,21 +611,104 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleHaptics(_ sender: NSMenuItem) {
         Haptics.isEnabled.toggle()
         sender.state = Haptics.isEnabled ? .on : .off
-        if Haptics.isEnabled { Haptics.overlayDidSnap() }
     }
 
     @objc private func toggleSwipeGestures(_ sender: NSMenuItem) {
         Settings.shared.swipeGestures.toggle()
         sender.state = Settings.shared.swipeGestures ? .on : .off
-        if !Settings.shared.swipeGestures {
-            model.resetGestureHidden()
-        }
         publishDebugState()
     }
 
     @objc private func runDemo() {
         DemoDriver.run(store: store) { [weak self] in
             Task { @MainActor in self?.scheduleRefresh() }
+        }
+    }
+
+    @objc private func checkForUpdates() {
+        automaticUpdateCheckTask?.cancel()
+        automaticUpdateCheckTask = nil
+        startUpdateCheck(presentUpToDate: true)
+    }
+
+    private func scheduleAutomaticUpdateCheck() {
+        automaticUpdateCheckTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.automaticUpdateCheckTask = nil
+            self?.startUpdateCheck(presentUpToDate: false)
+        }
+    }
+
+    private func startUpdateCheck(presentUpToDate: Bool) {
+        guard updateCheckTask == nil else { return }
+        checkForUpdatesMenuItem?.title = "Checking for Updates\u{2026}"
+        checkForUpdatesMenuItem?.isEnabled = false
+
+        updateCheckTask = Task { [weak self] in
+            do {
+                let result = try await UpdateChecker.check()
+                guard !Task.isCancelled else { return }
+                self?.finishUpdateCheck(result: result, error: nil, presentUpToDate: presentUpToDate)
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.finishUpdateCheck(result: nil, error: error, presentUpToDate: presentUpToDate)
+            }
+        }
+    }
+
+    private func finishUpdateCheck(
+        result: UpdateCheckResult?,
+        error: Error?,
+        presentUpToDate: Bool
+    ) {
+        updateCheckTask = nil
+        checkForUpdatesMenuItem?.title = "Check for Updates\u{2026}"
+        checkForUpdatesMenuItem?.isEnabled = true
+
+        if let error {
+            Log.error("update check failed: \(error.localizedDescription)")
+            guard presentUpToDate else { return }
+            presentUpdateAlert(
+                message: "Could not check for updates",
+                information: error.localizedDescription,
+                releaseURL: nil
+            )
+            return
+        }
+
+        switch result {
+        case let .updateAvailable(update):
+            presentUpdateAlert(
+                message: "Notch \(update.latestVersion) is available",
+                information: "You are currently using Notch \(update.currentVersion).",
+                releaseURL: update.releaseURL
+            )
+        case let .upToDate(currentVersion) where presentUpToDate:
+            presentUpdateAlert(
+                message: "Notch is up to date",
+                information: "You are using the latest version, Notch \(currentVersion).",
+                releaseURL: nil
+            )
+        default:
+            break
+        }
+    }
+
+    private func presentUpdateAlert(message: String, information: String, releaseURL: URL?) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = information
+        alert.alertStyle = .informational
+        if releaseURL != nil {
+            alert.addButton(withTitle: "Open Download Page")
+            alert.addButton(withTitle: "Later")
+        } else {
+            alert.addButton(withTitle: "OK")
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn, let releaseURL {
+            NSWorkspace.shared.open(releaseURL)
         }
     }
 

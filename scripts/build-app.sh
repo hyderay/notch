@@ -10,7 +10,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
 APP_NAME="Notch"
 BUNDLE_ID="com.wanquanlin.notch"
-VERSION="${VERSION:-1.0.0}"
+if [[ -z "${VERSION:-}" ]]; then
+  VERSION="$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null || printf '1.0.0')"
+fi
+VERSION="${VERSION#v}"
 
 BIN_DIR="$(swift build -c "$CONFIGURATION" --package-path "$ROOT" --show-bin-path)"
 APP="$ROOT/.build/$APP_NAME.app"

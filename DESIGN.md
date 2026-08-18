@@ -192,7 +192,7 @@ Compact (at least one agent running)
      ^ left ear                          ^ right ear
      agent glyph + spinning ring         session count + elapsed
 
-Expanded (hover, or auto-expand on a state change that needs attention)
+Expanded (level 2: click, outward two-finger swipe, or an attention state change)
     /--------------------------------------------\
    |  [notch]                                     |
    |  o codex   notch          working  2:07      |
@@ -224,17 +224,18 @@ In virtual-notch mode the app also paints the black rounded body itself; with a 
 
 ### 4.5 Interaction
 
-- Hovering either ear or the notch body expands it (120ms delay to avoid accidental triggers).
-- Moving away collapses it (400ms delay).
-
-- Expanding and collapsing under the pointer fire a Force Touch haptic tap (`.alignment` out, `.generic` back), rate-limited to one every 250ms. Auto-expansion deliberately does **not** tap: the user did not ask for it and a tap under a resting hand is startling. `NSHapticFeedbackManager` no-ops on hardware without a Force Touch trackpad and honors the system haptics setting, so no capability check is needed.
+- The interaction has three levels: hidden (0), compact (1), and expanded (2). A two-finger sweep toward the notch steps down; a sweep away steps up. Each gesture moves exactly one level.
+- Clicking toggles levels 1 and 2. Hovering never expands the panel.
+- Moving outside the expanded panel returns it to level 1 after a 120ms debounce, allowing a brief pointer excursion without flicker.
+- Every successful two-finger level transition fires a Force Touch haptic tap in both directions, rate-limited to one every 250ms. Boundary gestures, clicks, pointer-exit collapse, and auto-expansion remain silent. `NSHapticFeedbackManager` no-ops on hardware without a Force Touch trackpad and honors the system haptics setting, so no capability check is needed.
 - Clicking a row reveals that session's `cwd` in Finder.
 - Transitioning to `waiting` or `error` auto-expands for 4 seconds (can be disabled).
 - An `NSStatusItem` provides settings, hook installation, and quit. The persistent **Hide overlay in full screen** preference is enabled by default; active-Space and frontmost-application changes update overlay visibility without discarding session state. Once the destination is confirmed as full screen, the panel holds for 280ms and then fades over 340ms with an ease-in-out curve; the deliberate cadence reads as a transition instead of a late window-server flash. Detection checks `AXFullScreen` across the frontmost application's windows on the notched display because Chromium apps can update the focused window before the actual full-screen window. Delayed checks span the Space animation, with Quartz coverage retained as a fallback when the attribute is unavailable.
+- Update detection compares the bundle's semantic version with GitHub's latest non-prerelease Release. It checks once after launch, stays silent when current or offline, and exposes a manual menu action that always reports the result. Only public release metadata is requested; no session data is included.
 
-Hover is detected from global and local mouse-movement events, not with an `NSTrackingArea`. The obvious approach fails here: expanding resizes the panel, which makes AppKit call `updateTrackingAreas`, tear the area down, and emit a spurious exit/enter pair, so the overlay oscillates between compact and expanded several times a second. Evaluating the current pointer against a hysteretic hit region produces one enter and one exit without an idle polling timer. A separate precise-scroll monitor recognizes a two-finger vertical sweep in the island's top-center region. Physical motion toward the notch hides the entire island, while motion away restores it; normalizing `isDirectionInvertedFromDevice` makes this independent of the user's natural-scrolling preference. The monitor stays active after the panel is ordered out, and the menu preference can disable it.
+Pointer exit is detected from global and local mouse-movement events, not with an `NSTrackingArea`. Resizing the panel makes AppKit rebuild tracking areas and emit spurious transitions; evaluating the pointer against a hysteretic hit region avoids that oscillation without an idle polling timer. A separate precise-scroll monitor recognizes a two-finger vertical sweep in the top-center hot zone whenever sessions exist, including level 0 so it can restore level 1. Physical motion away from the notch increments the level and motion toward it decrements the level. Normalizing `isDirectionInvertedFromDevice` makes this independent of the user's natural-scrolling preference.
 
-Gesture restoration prelays out the ordered-out panel at its final compact frame, forces one offscreen render, and then fades it in over 240ms. Hidden-to-compact does not use the SwiftUI size spring; keeping that spring only for compact-to-expanded avoids competing with AppKit's parked 1pt window frame on the first visible frame.
+Hidden-to-compact prelays out the ordered-out panel at its final compact frame, forces one offscreen render, and then fades it in over 240ms. Keeping the SwiftUI size spring only for compact-to-expanded avoids competing with AppKit's parked 1pt window frame on the first visible frame.
 
 The compact spinner and elapsed-time label observe window ordering as well as view attachment. An ordered-out panel retains its SwiftUI tree and session state, but its UI timers stop until the window is visible again; checking only `view.window` is insufficient because AppKit keeps ordered-out views attached to their window.
 
@@ -315,7 +316,7 @@ An app that runs all day has to be invisible in Activity Monitor. Measured on th
 | --- | --- | --- |
 | Idle, overlay hidden | 0.0–0.2% | 56 MB |
 | Compact overlay, spinner running | 0.6–0.8% | 61 MB |
-| Expanded panel, hovering | 0.8–1.0% | 62 MB |
+| Expanded panel | 0.8–1.0% | 62 MB |
 
 Three fixes got it there, each found by measuring rather than by reading the code.
 
@@ -327,7 +328,7 @@ Three fixes got it there, each found by measuring rather than by reading the cod
 
 Memory is flat under load. Across 8,000 rapid session events the resident set reached a working-set plateau near 75 MB and then moved 160 KB over the final 6,000. `leaks` reports a fixed 20 KB inside `NSXPCConnection`/AppIntents system machinery, byte-identical before and after a further 1,600 events plus repeated hover cycles, with nothing attributed to this code.
 
-Timers only run when they have something to do: the one-second clock and the 12.5Hz hover poll both start when the overlay becomes visible and stop when it hides.
+Timers only run when they have something to do. Pointer exit and two-finger input are event-driven; the one-second clock runs only while elapsed time is visible.
 
 ---
 

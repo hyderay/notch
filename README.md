@@ -18,7 +18,7 @@ Shows what your AI coding agents are doing, in the MacBook notch.
   <img src="Resources/NotchExpanded.png" width="760" alt="Notch showing Codex CLI and Claude Code sessions">
 </p>
 
-When Codex CLI or Claude Code is working, the notch quietly grows a little wider and shows a spinner plus a timer. Hover it and it drops down into a panel listing every live session, what each one is doing right now, and how long it has been at it. When nothing is running, it disappears completely.
+When Codex CLI or Claude Code is working, the notch has three levels: hidden (0), compact status (1), and the full session panel (2). Swipe two fingers toward the notch to step down `2 -> 1 -> 0`, or away from it to step up `0 -> 1 -> 2`. Click toggles levels 1 and 2, and moving the pointer outside level 2 returns it to level 1. When nothing is running, gestures do nothing.
 
 ```
         /--------------------\
@@ -26,16 +26,14 @@ When Codex CLI or Claude Code is working, the notch quietly grows a little wider
                                                   
     /----------------------------------\
    |             [notch]                |
-   |  o codex   notch     working  2:07 |          expanded (on hover)
+   |  o codex   notch     working  2:07 |          expanded
    |    Run swift build                 |
    |  * claude  my-api    waiting  0:12 |
    |    Needs permission to write       |
     \----------------------------------/
 ```
 
-Expanding under the pointer gives a Force Touch haptic tap, so the notch feels like a physical control rather than a hover tooltip. Collapsing and auto-expansion (when an agent needs your attention) stay silent on purpose.
-
-Push two fingers toward the island to hide it completely, even from compact mode. Pull two fingers away from the same top-center area to bring it back. The gesture can be disabled from the menu bar.
+Every successful two-finger level change gives a Force Touch haptic tap, in both directions. Boundary gestures, clicks, pointer-exit collapse, and auto-expansion stay silent. The gesture can be disabled from the menu bar.
 
 ---
 
@@ -46,7 +44,7 @@ Push two fingers toward the island to hide it completely, even from compact mode
 - Integrates directly with the hardware notch on supported MacBooks
 - Provides optional agent hooks for more precise status updates
 - Exposes a local `notchctl` interface for scripts and other agents
-- Stays local: no accounts, analytics, or network requests
+- Keeps agent data local: no accounts or analytics; update checks only request public GitHub release metadata
 
 ---
 
@@ -144,7 +142,7 @@ States are `idle`, `thinking`, `working`, `waiting`, `done`, and `error`. When s
 
 ## Menu bar
 
-A menu bar item offers hook installation, the auto-expand, swipe, and haptic preferences, the demo, and quit. **Hide overlay in full screen** is enabled by default and can be toggled from this menu; the preference persists across restarts.
+A menu bar item offers hook installation, update checking, the auto-expand, swipe, and haptic preferences, the demo, and quit. Notch checks GitHub Releases once at launch and only presents automatic checks when a newer version exists; **Check for Updates...** always reports the result. **Hide overlay in full screen** is enabled by default and can be toggled from this menu; the preference persists across restarts.
 
 ## Environment variables
 
@@ -206,7 +204,7 @@ Watchers are event-driven (FSEvents), not polling, and the compact status indica
 
 ## Privacy
 
-Everything is local. Notch reads transcript files that already exist on your disk, keeps session state in memory only, and makes no network connections. The IPC socket lives in a `0700` directory with `0600` permissions and accepts only local connections.
+Agent data stays local. Notch reads transcript files that already exist on your disk and keeps session state in memory only. Update detection makes one metadata request to the public GitHub Releases API at launch or when **Check for Updates...** is selected; it sends no session, path, or usage data. The IPC socket lives in a `0700` directory with `0600` permissions and accepts only local connections.
 
 ## Contributing
 

@@ -42,6 +42,10 @@ struct NotchRootView: View {
                         showsRing: model.presentation != .expanded,
                         showsActivity: model.presentation == .compact
                     )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        model.toggleManualExpansion()
+                    }
                     if model.presentation == .expanded {
                         ExpandedView(model: model)
                     }

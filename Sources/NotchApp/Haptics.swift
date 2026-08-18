@@ -1,6 +1,6 @@
 import AppKit
 
-/// Force Touch trackpad feedback for opening the overlay by hover.
+/// Force Touch trackpad feedback for two-finger expansion-level changes.
 ///
 /// `NSHapticFeedbackManager` is a no-op on hardware without a Force Touch
 /// trackpad and respects the system "Force Click and haptic feedback" setting,
@@ -18,7 +18,7 @@ enum Haptics {
 
     /// A distinct tap for a discrete overlay transition. The generic pattern is
     /// more reliable for feedback that is not tied to an active drag gesture.
-    static func overlayDidSnap() {
+    static func twoFingerSwipeDidTransition() {
         guard isEnabled else { return }
         let now = Date()
         guard now.timeIntervalSince(lastFired) >= minimumInterval else { return }

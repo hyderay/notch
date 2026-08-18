@@ -24,7 +24,7 @@ final class OverlayDebugState: @unchecked Sendable {
         var autoExpanding = false
         var fullScreenActive = false
         var hideInFullScreen = true
-        var gestureHidden = false
+        var expansionLevel = 0
         var swipeGestures = true
     }
 
@@ -66,7 +66,7 @@ final class OverlayDebugState: @unchecked Sendable {
             "autoExpanding": s.autoExpanding,
             "fullScreenActive": s.fullScreenActive,
             "hideInFullScreen": s.hideInFullScreen,
-            "gestureHidden": s.gestureHidden,
+            "expansionLevel": s.expansionLevel,
             "swipeGestures": s.swipeGestures,
         ]
     }

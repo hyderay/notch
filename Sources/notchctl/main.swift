@@ -273,7 +273,7 @@ func runInspect() -> Never {
     print("  window            \(rect("windowFrame"))")
     print("  full screen       \((root["fullScreenActive"] as? Bool) == true ? "yes" : "no")")
     print("  hide full screen  \((root["hideInFullScreen"] as? Bool) == true ? "on" : "off")")
-    print("  gesture hidden    \((root["gestureHidden"] as? Bool) == true ? "yes" : "no")")
+    print("  expansion level   \((root["expansionLevel"] as? Int) ?? 0)")
     print("  two-finger swipe  \((root["swipeGestures"] as? Bool) == true ? "on" : "off")")
     print("  hovering          \((root["hovering"] as? Bool) == true ? "yes" : "no")")
     print("  auto-expanding    \((root["autoExpanding"] as? Bool) == true ? "yes" : "no")")

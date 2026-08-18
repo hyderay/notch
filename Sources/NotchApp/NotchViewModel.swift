@@ -8,7 +8,7 @@ enum NotchPresentation: Equatable {
     case expanded
 }
 
-/// Drives what the overlay shows: owns the snapshot, hover debouncing, and
+/// Drives what the overlay shows: owns the snapshot, explicit expansion, and
 /// auto-expansion when a session needs attention.
 @MainActor
 final class NotchViewModel: ObservableObject {
@@ -19,7 +19,7 @@ final class NotchViewModel: ObservableObject {
     @Published private(set) var presentation: NotchPresentation = .hidden
     @Published private(set) var geometry: NotchGeometry
     @Published var hoveredSessionID: String?
-    private(set) var isGestureHidden = false
+    private var manualExpansionLevel: IslandExpansionLevel?
 
     private let store: SessionStore
     private(set) var isHovering = false
@@ -27,8 +27,6 @@ final class NotchViewModel: ObservableObject {
     private var autoExpandDeadline: Date?
     private var autoExpandTimer: Timer?
     private var lastGlobalState: SessionState = .idle
-    /// Restoring under the cursor should show compact first, not immediately hover-open.
-    private var suppressHoverUntilExit = false
 
     /// Called whenever the window needs a new frame.
     var onLayoutChange: ((CGSize) -> Void)?
@@ -51,8 +49,8 @@ final class NotchViewModel: ObservableObject {
         snapshot = next
         lastGlobalState = next.globalState
         if next.sessions.isEmpty {
-            isGestureHidden = false
-            suppressHoverUntilExit = false
+            manualExpansionLevel = nil
+            cancelAutoExpansion()
         }
 
         if Settings.shared.autoExpandOnAttention,
@@ -77,10 +75,6 @@ final class NotchViewModel: ObservableObject {
     func setHovering(_ hovering: Bool) {
         hoverWorkItem?.cancel()
         hoverWorkItem = nil
-        if suppressHoverUntilExit {
-            if hovering { return }
-            suppressHoverUntilExit = false
-        }
         // Re-entering while a collapse is queued must cancel that collapse even
         // though `isHovering` is still true.
         if hovering == isHovering { return }
@@ -99,38 +93,57 @@ final class NotchViewModel: ObservableObject {
 
     private func applyHover(_ hovering: Bool) {
         guard hovering != isHovering else { return }
-        let before = presentation
         isHovering = hovering
-        updatePresentation()
-        if presentation == .expanded, before != .expanded {
-            Haptics.overlayDidSnap()
+        if !hovering, presentation == .expanded {
+            collapse()
         }
         onStateChange?()
     }
 
-    /// Directional two-finger sweeps hide or restore the whole island.
-    func setGestureHidden(_ hidden: Bool) {
+    func toggleManualExpansion() {
+        guard presentation != .hidden else { return }
+        if presentation == .expanded {
+            setManualExpansionLevel(.compact)
+        } else {
+            setManualExpansionLevel(.expanded)
+        }
+        onStateChange?()
+    }
+
+    /// Moves one step through hidden, compact, and expanded in the swipe direction.
+    func applyTwoFingerSwipe(_ intent: IslandSwipeIntent) {
         guard Settings.shared.swipeGestures, !snapshot.sessions.isEmpty else { return }
-        guard hidden != isGestureHidden else { return }
         let before = presentation
-        hoverWorkItem?.cancel()
-        hoverWorkItem = nil
-        isGestureHidden = hidden
-        isHovering = false
-        suppressHoverUntilExit = !isGestureHidden
-        updatePresentation()
+        let current: IslandExpansionLevel
+        switch presentation {
+        case .hidden: current = .hidden
+        case .compact: current = .compact
+        case .expanded: current = .expanded
+        }
+
+        guard let target = IslandSwipeGesture.nextLevel(from: current, intent: intent) else { return }
+
+        setManualExpansionLevel(target)
         if presentation != before {
-            Haptics.overlayDidSnap()
+            Haptics.twoFingerSwipeDidTransition()
         }
         onStateChange?()
     }
 
-    func resetGestureHidden() {
-        guard isGestureHidden else { return }
-        isGestureHidden = false
-        suppressHoverUntilExit = true
+    private func collapse() {
+        setManualExpansionLevel(.compact)
+    }
+
+    private func setManualExpansionLevel(_ level: IslandExpansionLevel) {
+        manualExpansionLevel = level
+        cancelAutoExpansion()
         updatePresentation()
-        onStateChange?()
+    }
+
+    private func cancelAutoExpansion() {
+        autoExpandDeadline = nil
+        autoExpandTimer?.invalidate()
+        autoExpandTimer = nil
     }
 
     // MARK: - Presentation
@@ -156,9 +169,9 @@ final class NotchViewModel: ObservableObject {
         let next: NotchPresentation
         if snapshot.sessions.isEmpty {
             next = .hidden
-        } else if isGestureHidden {
+        } else if manualExpansionLevel == .hidden {
             next = .hidden
-        } else if isHovering || wantsAutoExpand || snapshot.sessions.contains(where: { $0.state == .waiting }) {
+        } else if manualExpansionLevel == .expanded || wantsAutoExpand {
             next = .expanded
         } else {
             next = .compact
@@ -169,6 +182,14 @@ final class NotchViewModel: ObservableObject {
             hoveredSessionID = nil
         }
         onLayoutChange?(contentSize)
+    }
+
+    var expansionLevel: Int {
+        switch presentation {
+        case .hidden: return 0
+        case .compact: return 1
+        case .expanded: return 2
+        }
     }
 
     func resolvePermission(for session: AgentSession, decision: PermissionDecision) {
